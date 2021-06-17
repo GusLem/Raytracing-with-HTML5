@@ -6,7 +6,7 @@ const BACKGROUND_COLOR = [15,15,15];
 const ORIGIN = [0,0,0];
 
 //Spheres
-let Sphere = function (position, radius, color, specular) {
+let Sphere = function (position, radius, color, specular,mirror) {
     this.position = position;
     this.radius = radius;
     this.color = color;
@@ -14,9 +14,9 @@ let Sphere = function (position, radius, color, specular) {
 }
 
 let spheres = [
-    new Sphere([1,0,5],1,[255,0,0],200),
+    new Sphere([2,0,5],1,"mirror",200),
     new Sphere([-0.5,0,3],1,[0,0,255],2050),
-    new Sphere([0,-5001,0],5000,[255,255,0],null)
+    new Sphere([1,-0.8,3],0.2,[255,0,255],2050),
 ]
 
 //Lights
@@ -112,6 +112,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
     for (let i = 0; i < lights.length; i++) {
         let rayVector = null;
         let ii = 0;
+        let t_max ;
         switch(lights[i].type) {
 
             case "ambient":
@@ -121,16 +122,24 @@ let ComputeLighting = (intersection, normal,view,specular) => {
             case "point":
                 rayVector = Subtract(lights[i].position,intersection);
                 ii = lights[i].intensity;
+                t_max = 1;
             break;
 
             case "directional":
                 rayVector = lights[i].direction;
                 ii = lights[i].intensity;
+                t_max = Infinity;
             break;
 
         }
 
         if (rayVector == null) {
+            continue;
+        }
+
+        let shadowData = ClosestSphere(intersection,rayVector,0.001,t_max);
+
+        if (shadowData[4]) {
             continue;
         }
         
@@ -181,36 +190,91 @@ let IntersectRaySphere = (origin, direction, sphere) => {
 
 }
 
-let TraceRay = (origin, direction, t_min, t_max) => {
-    let closest_t = Infinity;
-    let closest_sphere = null;
+let IntersectFloor = (origin,direction) => {
+    return ((-1-origin[1])/direction[1]);
+}
 
+let ClosestSphere = (origin,direction, t_min, t_max) => {
+    let closest_t = Infinity;
+    let color = null;
+    let specular = null;
+    let position = null;
+    let hit = false;
     for (let i = 0; i < spheres.length; i++) {
         let t = IntersectRaySphere(origin,direction,spheres[i])
-
+        
         if (t[0] > t_min && t[0] < t_max) {
             if (t[0] < closest_t) {
                 closest_t = t[0]
-                closest_sphere = spheres[i];
+                color = spheres[i].color;
+                specular = spheres[i].specular;
+                position = spheres[i].position;
+                hit = true
             }
         }
         if (t[1] > t_min && t[1] < t_max) {
             if (t[1] < closest_t) {
                 closest_t = t[1]
-                closest_sphere = spheres[i];
+                color = spheres[i].color;
+                specular = spheres[i].specular;
+                position = spheres[i].position;
+                hit = true
             }
+        }
+
+    }
+
+    return [closest_t,color,specular,position,hit];
+}
+
+let TraceRay = (origin, direction, t_min, t_max) => {
+    
+    let plane = false;
+
+    let closestData = ClosestSphere(origin,direction,t_min,t_max);
+
+    let closest_t = closestData[0]
+    let color = closestData[1];
+    let specular = closestData[2];
+    let position = closestData[3];
+    let hit = closestData[4];
+
+    let tf = IntersectFloor(origin,direction);
+
+    if (tf > t_min && tf < t_max) {
+        if (tf < closest_t) {
+            closest_t = tf
+            let it = Add(origin,Multiply(closest_t,direction));
+            let checker = (Math.abs(it[0] % 1) < 0.5)
+            if (Math.abs(it[2] % 1) < 0.5)
+                checker = !checker;
+
+            color = Multiply(checker,[255,255,255]);
+            specular = null
+            hit = true
+            plane = true
         }
     }
 
-        if (closest_sphere == null) {
+        if (!hit) {
             return BACKGROUND_COLOR;
         }
 
         let intersection = Add(origin,Multiply(closest_t,direction));
-        let normal = Subtract(intersection, closest_sphere.position);
-        normal = Multiply(1/Length(normal),normal);
+        let normal;
+        if (plane) {
+            normal =[0,1,0];
+        }
+        else {
+            normal = Subtract(intersection, position);
+            normal = Multiply(1/Length(normal),normal);
+        }
 
-        return Multiply(ComputeLighting(intersection, normal,Multiply(-1,direction),closest_sphere.specular),closest_sphere.color);
+        if (color == "mirror") {
+            return TraceRay(intersection,normal,0.001,t_max);
+        }
+
+        return Multiply(ComputeLighting(intersection, normal,Multiply(-1,direction),specular),color);
 }
 
 for (let i = -canvas.width/2; i <= canvas.width/2; i++) {
