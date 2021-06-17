@@ -3,20 +3,21 @@
 let viewport_size = 1;
 let viewport_distance = 1;
 const BACKGROUND_COLOR = [15,15,15];
-const ORIGIN = [0,0,0];
+let cameraDist = 0;
 
 //Spheres
-let Sphere = function (position, radius, color, specular,mirror) {
+let Sphere = function (position, radius, color, specular,reflective) {
     this.position = position;
     this.radius = radius;
     this.color = color;
-    this.specular = specular
+    this.specular = specular;
+    this.reflective = reflective;
 }
 
 let spheres = [
-    new Sphere([2,0,5],1,"mirror",200),
-    new Sphere([-0.5,0,3],1,[0,0,255],2050),
-    new Sphere([1,-0.8,3],0.2,[255,0,255],2050),
+    new Sphere([2,0,5],1,[200,200,200],200,0.95),
+    new Sphere([-0.5,0,3],1,[0,0,255],2050,0.1),
+    new Sphere([1,-0.8,3],0.2,[255,0,255],2050,0),
 ]
 
 //Lights
@@ -67,8 +68,8 @@ let UpdateCanvas = () => {
 
 let CanvasToViewport = (x,y) => {
     return [
-        x*viewport_size / canvas.width,
-        y*viewport_size / canvas.height,
+        x*1.77 / canvas.width,
+        y*1 / canvas.height,
         viewport_distance
     ];
 }
@@ -151,7 +152,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
 
         //Specular
         if (specular != null) {
-            let reflection = Subtract(Multiply(2*normalRayDot,normal),rayVector);
+            let reflection = ReflectRay(rayVector,normal)
             let reflectionViewDot = DotProduct(reflection,view);
 
             if (reflectionViewDot > 0) {
@@ -164,6 +165,11 @@ let ComputeLighting = (intersection, normal,view,specular) => {
 }
 
 //Raytracing functions
+let ReflectRay = (ray, normal) => {
+    let dot = DotProduct(normal,ray);
+    return Subtract(Multiply(2*dot,normal),ray);
+}
+
 let IntersectRaySphere = (origin, direction, sphere) => {
     let radius = sphere.radius;
     let position_to_origin = Subtract(origin, sphere.position)
@@ -200,6 +206,7 @@ let ClosestSphere = (origin,direction, t_min, t_max) => {
     let specular = null;
     let position = null;
     let hit = false;
+    let reflective = 0;
     for (let i = 0; i < spheres.length; i++) {
         let t = IntersectRaySphere(origin,direction,spheres[i])
         
@@ -209,6 +216,7 @@ let ClosestSphere = (origin,direction, t_min, t_max) => {
                 color = spheres[i].color;
                 specular = spheres[i].specular;
                 position = spheres[i].position;
+                reflective = spheres[i].reflective;
                 hit = true
             }
         }
@@ -218,16 +226,17 @@ let ClosestSphere = (origin,direction, t_min, t_max) => {
                 color = spheres[i].color;
                 specular = spheres[i].specular;
                 position = spheres[i].position;
+                reflective = spheres[i].reflective;
                 hit = true
             }
         }
 
     }
 
-    return [closest_t,color,specular,position,hit];
+    return [closest_t,color,specular,position,hit,reflective];
 }
 
-let TraceRay = (origin, direction, t_min, t_max) => {
+let TraceRay = (origin, direction, t_min, t_max, recursion_count) => {
     
     let plane = false;
 
@@ -238,6 +247,7 @@ let TraceRay = (origin, direction, t_min, t_max) => {
     let specular = closestData[2];
     let position = closestData[3];
     let hit = closestData[4];
+    let reflective = closestData[5];
 
     let tf = IntersectFloor(origin,direction);
 
@@ -251,6 +261,7 @@ let TraceRay = (origin, direction, t_min, t_max) => {
 
             color = Multiply(checker,[255,255,255]);
             specular = null
+            reflective = 0.3
             hit = true
             plane = true
         }
@@ -270,19 +281,50 @@ let TraceRay = (origin, direction, t_min, t_max) => {
             normal = Multiply(1/Length(normal),normal);
         }
 
-        if (color == "mirror") {
-            return TraceRay(intersection,normal,0.001,t_max);
+        let negativeDirection = Multiply(-1,direction)
+
+        let thisColor = Multiply(ComputeLighting(intersection, normal,negativeDirection,specular),color);
+
+        if (recursion_count > 0 && reflective > 0) {
+            let reflectionVector = ReflectRay(negativeDirection,normal);
+            reflectedColor = TraceRay(intersection,reflectionVector,0.001,t_max,recursion_count-1);
+
+            return Add(Multiply(1-reflective,thisColor),Multiply(reflective,reflectedColor));
         }
 
-        return Multiply(ComputeLighting(intersection, normal,Multiply(-1,direction),specular),color);
+        return thisColor;
 }
 
-for (let i = -canvas.width/2; i <= canvas.width/2; i++) {
-    for (let j = -canvas.width/2; j <= canvas.width/2; j++) {
-        let direction = CanvasToViewport(i,j);
-        let color = TraceRay(ORIGIN,direction,1,Infinity);
-        PutPixel(i,j,color);
-    } 
+let Render = () => {
+    for (let i = -canvas.width/2; i <= canvas.width/2; i++) {
+        for (let j = -canvas.width/2; j <= canvas.width/2; j++) {
+            let direction = CanvasToViewport(i,j);
+            let color = TraceRay([0,0,cameraDist],direction,1,Infinity,3);
+            PutPixel(i,j,color);
+        } 
+    }
+
+    UpdateCanvas();
 }
 
-UpdateCanvas();
+function DownloadCanvasAsImage(){
+    let downloadLink = document.createElement('a');
+    downloadLink.setAttribute('download', 'CanvasAsImage.png');
+    let dataURL = canvas.toDataURL('image/png');
+    let url = dataURL.replace(/^data:image\/png/,'data:application/octet-stream');
+    downloadLink.setAttribute('href', url);
+    downloadLink.click();
+}
+
+let Animate = () => {
+    requestAnimationFrame( Animate )
+    cameraDist-=0.1;
+    DownloadCanvasAsImage();
+    Render();
+} 
+
+
+Render();
+//Animate()
+
+ 
