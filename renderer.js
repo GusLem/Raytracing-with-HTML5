@@ -3,7 +3,7 @@
 let viewport_size = 1;
 let viewport_distance = 1;
 const BACKGROUND_COLOR = [15,15,15];
-let cameraDist = 0;
+let rotation = 0;
 
 //Spheres
 let Sphere = function (position, radius, color, specular,reflective) {
@@ -97,6 +97,14 @@ let Subtract = (v0,v1) => {
         v0[1] - v1[1],
         v0[2] - v1[2],
     ]
+}
+
+let RotateY = (rotation, v) => {
+    rotation *= Math.PI/180;
+    xx = v[0]*Math.cos(rotation) - v[2]*Math.sin(rotation);
+    zz = v[0]*Math.sin(rotation) + v[2]*Math.cos(rotation);
+
+    return [xx,v[1],zz];
 }
 
 let DotProduct = (v0,v1) => {
@@ -295,11 +303,18 @@ let TraceRay = (origin, direction, t_min, t_max, recursion_count) => {
         return thisColor;
 }
 
-let Render = () => {
+let Render = (rotation) => {
     for (let i = -canvas.width/2; i <= canvas.width/2; i++) {
         for (let j = -canvas.width/2; j <= canvas.width/2; j++) {
             let direction = CanvasToViewport(i,j);
-            let color = TraceRay([0,0,cameraDist],direction,1,Infinity,3);
+            direction = RotateY(rotation,direction);
+
+            let axis = [1,0,4]
+            let cameraVector = RotateY(rotation,[-1,0,-4]);
+
+            let cameraPosition = Add(axis,cameraVector);
+
+            let color = TraceRay(cameraPosition,direction,1,Infinity,3);
             PutPixel(i,j,color);
         } 
     }
@@ -318,13 +333,13 @@ function DownloadCanvasAsImage(){
 
 let Animate = () => {
     requestAnimationFrame( Animate )
-    cameraDist-=0.1;
-    DownloadCanvasAsImage();
-    Render();
-} 
+    rotation += 0.5
+    //DownloadCanvasAsImage();
+    Render(rotation);
+}
 
 
-Render();
+Render(0);
 //Animate()
 
  
