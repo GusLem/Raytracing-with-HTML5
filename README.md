@@ -2,7 +2,7 @@
 
 ![Example](screencap.png)
 
-Followed the tutorial of Gabriel Gambetta's Book [which can be found here](https://www.gabrielgambetta.com/computer-graphics-from-scratch/)
+Followed the tutorial of Gabriel Gambetta's Book [which can be found here](https://www.gabrielgambetta.com/computer-graphics-from-scratch/). Everything is software rendered and runs in a single core.
 
 https://user-images.githubusercontent.com/12075584/122659646-770f1c80-d150-11eb-955a-da3004e39b3a.mp4
 
