@@ -1,11 +1,11 @@
+//Constants
+const BACKGROUND_COLOR = [15,15,15]; //Colors are represented as arrays with 3 elements -> RGB
+const CAMERA_ANGLE = 25;
+const CANVAS_WIDTH = 1366;
+const CANVAS_HEIGHT = 768;
+const ROTATION_AXIS = [1,0,4];
 
-//Scene
-let viewport_size = 1;
-let viewport_distance = 1;
-const BACKGROUND_COLOR = [15,15,15];
-let rotation = 0;
-
-//Spheres
+//Sphere Constructor
 let Sphere = function (position, radius, color, specular,reflective) {
     this.position = position;
     this.radius = radius;
@@ -14,34 +14,38 @@ let Sphere = function (position, radius, color, specular,reflective) {
     this.reflective = reflective;
 }
 
+//Spheres
 let spheres = [
     new Sphere([2,0,5],1,[200,200,200],200,0.95),
     new Sphere([-0.5,0,3],1,[0,0,255],2050,0.1),
     new Sphere([1,-0.8,3],0.2,[255,0,255],2050,0),
 ]
 
-//Lights
-let Light = function (type, intensity) {
+//Light Constructor
+let Light = function (type, intensity, position, direction) {
     this.type = type;
     this.intensity = intensity;
-    this.position = null;
-    this.direction = null;
+
+    //Only point lights have positions
+    this.position = position;
+
+    //Only directional lights have direction
+    this.direction = direction;
 }
 
-let light_point = new Light("point", 0.6);
-light_point.position = [1,0,2];
-
-let light_direction = new Light("directional", 0.2);
-light_direction.direction = [1,1,0];
-
+//Lights
 let lights = [
     new Light("ambient", 0.2),
-    light_point,
-    light_direction,
+    new Light("point", 0.6,[1,0,2],null),
+    new Light("directional", 0.2,null,[1,1,0]),
 ]
 
 //Canvas Setup
 let canvas = document.getElementById("canvas");
+
+canvas.width = CANVAS_WIDTH;
+canvas.height = CANVAS_HEIGHT;
+
 let canvas_context = canvas.getContext("2d");
 let canvas_buffer = canvas_context.getImageData(0, 0, canvas.width, canvas.height);
 let canvas_pitch = canvas_buffer.width * 4;
@@ -67,14 +71,19 @@ let UpdateCanvas = () => {
 }
 
 let CanvasToViewport = (x,y) => {
+    let ratio = canvas.width/canvas.height;
+    let viewport_width = ratio; 
+    let viewport_height = 1;
+    let viewport_distance = 1;
+
     return [
-        x*1.77 / canvas.width,
-        y*1 / canvas.height,
+        x*viewport_width / canvas.width,
+        y*viewport_height / canvas.height,
         viewport_distance
     ];
 }
 
-//Vector funcions
+//Vector functions
 let Add = (v0,v1) => {
     return [
         v0[0] + v1[0],
@@ -99,10 +108,10 @@ let Subtract = (v0,v1) => {
     ]
 }
 
-let RotateY = (rotation, v) => {
-    rotation *= Math.PI/180;
-    xx = v[0]*Math.cos(rotation) - v[2]*Math.sin(rotation);
-    zz = v[0]*Math.sin(rotation) + v[2]*Math.cos(rotation);
+let RotateY = (rotationDegrees, v) => {
+    rotationDegrees *= Math.PI/180;
+    xx = v[0]*Math.cos(rotationDegrees) - v[2]*Math.sin(rotationDegrees);
+    zz = v[0]*Math.sin(rotationDegrees) + v[2]*Math.cos(rotationDegrees);
 
     return [xx,v[1],zz];
 }
@@ -120,7 +129,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
     let intensity = 0;
     for (let i = 0; i < lights.length; i++) {
         let rayVector = null;
-        let ii = 0;
+        let localIntensity = 0;
         let t_max ;
         switch(lights[i].type) {
 
@@ -130,13 +139,13 @@ let ComputeLighting = (intersection, normal,view,specular) => {
 
             case "point":
                 rayVector = Subtract(lights[i].position,intersection);
-                ii = lights[i].intensity;
+                localIntensity = lights[i].intensity;
                 t_max = 1;
             break;
 
             case "directional":
                 rayVector = lights[i].direction;
-                ii = lights[i].intensity;
+                localIntensity = lights[i].intensity;
                 t_max = Infinity;
             break;
 
@@ -146,6 +155,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
             continue;
         }
 
+        //Do not calculate non-ambient light in case of shadows
         let shadowData = ClosestSphere(intersection,rayVector,0.001,t_max);
 
         if (shadowData[4]) {
@@ -155,7 +165,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
         //Diffuse
         let normalRayDot = DotProduct(normal,rayVector);
         if (normalRayDot > 0) {
-            intensity += ii * normalRayDot / Length(rayVector);
+            intensity += localIntensity * normalRayDot / Length(rayVector);
         }
 
         //Specular
@@ -164,7 +174,7 @@ let ComputeLighting = (intersection, normal,view,specular) => {
             let reflectionViewDot = DotProduct(reflection,view);
 
             if (reflectionViewDot > 0) {
-                intensity += ii* Math.pow(reflectionViewDot/(Length(reflection)*Length(view)),specular);
+                intensity += localIntensity * Math.pow(reflectionViewDot/(Length(reflection)*Length(view)),specular);
             }
         }
     }
@@ -208,6 +218,15 @@ let IntersectFloor = (origin,direction) => {
     return ((-1-origin[1])/direction[1]);
 }
 
+let GenerateFloorPattern = (origin,direction,closest_t) => {
+    let floorIntersection = Add(origin,Multiply(closest_t,direction));
+    let checker = (Math.abs(floorIntersection[0] % 1) < 0.5)
+    if (Math.abs(floorIntersection[2] % 1) < 0.5)
+        checker = !checker;
+
+    return Multiply(checker,[255,255,255]);
+}
+
 let ClosestSphere = (origin,direction, t_min, t_max) => {
     let closest_t = Infinity;
     let color = null;
@@ -248,6 +267,7 @@ let TraceRay = (origin, direction, t_min, t_max, recursion_count) => {
     
     let plane = false;
 
+    //Check intersection with floor
     let closestData = ClosestSphere(origin,direction,t_min,t_max);
 
     let closest_t = closestData[0]
@@ -257,62 +277,63 @@ let TraceRay = (origin, direction, t_min, t_max, recursion_count) => {
     let hit = closestData[4];
     let reflective = closestData[5];
 
+    //Check intersection with floor
     let tf = IntersectFloor(origin,direction);
 
     if (tf > t_min && tf < t_max) {
         if (tf < closest_t) {
-            closest_t = tf
-            let it = Add(origin,Multiply(closest_t,direction));
-            let checker = (Math.abs(it[0] % 1) < 0.5)
-            if (Math.abs(it[2] % 1) < 0.5)
-                checker = !checker;
-
-            color = Multiply(checker,[255,255,255]);
-            specular = null
-            reflective = 0.3
-            hit = true
-            plane = true
+            closest_t = tf;
+            color = GenerateFloorPattern(origin,direction,closest_t);
+            specular = null;
+            reflective = 0.3;
+            hit = true;
+            plane = true;
         }
     }
 
-        if (!hit) {
-            return BACKGROUND_COLOR;
-        }
+    if (!hit) {
+        return BACKGROUND_COLOR;
+    }
 
-        let intersection = Add(origin,Multiply(closest_t,direction));
-        let normal;
-        if (plane) {
-            normal =[0,1,0];
-        }
-        else {
-            normal = Subtract(intersection, position);
-            normal = Multiply(1/Length(normal),normal);
-        }
+    let intersection = Add(origin,Multiply(closest_t,direction));
+    let normal;
+    if (plane) {
+        normal =[0,1,0];
+    }
+    else {
+        normal = Subtract(intersection, position);
 
-        let negativeDirection = Multiply(-1,direction)
+        //Assure that the normal is a unit vector
+        normal = Multiply(1/Length(normal),normal);
+    }
 
-        let thisColor = Multiply(ComputeLighting(intersection, normal,negativeDirection,specular),color);
+    let negativeDirection = Multiply(-1,direction)
 
-        if (recursion_count > 0 && reflective > 0) {
-            let reflectionVector = ReflectRay(negativeDirection,normal);
-            reflectedColor = TraceRay(intersection,reflectionVector,0.001,t_max,recursion_count-1);
+    let thisColor = Multiply(ComputeLighting(intersection, normal,negativeDirection,specular),color);
 
-            return Add(Multiply(1-reflective,thisColor),Multiply(reflective,reflectedColor));
-        }
+    if (recursion_count > 0 && reflective > 0) {
+        let reflectionVector = ReflectRay(negativeDirection,normal);
+        reflectedColor = TraceRay(intersection,reflectionVector,0.001,t_max,recursion_count-1);
 
-        return thisColor;
+        return Add(Multiply(1-reflective,thisColor),Multiply(reflective,reflectedColor));
+    }
+
+    return thisColor;
 }
 
 let Render = (rotation) => {
     for (let i = -canvas.width/2; i <= canvas.width/2; i++) {
         for (let j = -canvas.width/2; j <= canvas.width/2; j++) {
             let direction = CanvasToViewport(i,j);
+
+            //Makes the camera rotate a predefined centre while looking at it
             direction = RotateY(rotation,direction);
 
-            let axis = [1,0,4]
-            let cameraVector = RotateY(rotation,[-1,0,-4]);
+            //Put the camera at the origin when at angle zero
+            let cameraVector = Multiply(-1,ROTATION_AXIS)
+            let cameraVectorRotated = RotateY(rotation,cameraVector);
 
-            let cameraPosition = Add(axis,cameraVector);
+            let cameraPosition = Add(ROTATION_AXIS,cameraVectorRotated);
 
             let color = TraceRay(cameraPosition,direction,1,Infinity,3);
             PutPixel(i,j,color);
@@ -331,15 +352,19 @@ function DownloadCanvasAsImage(){
     downloadLink.click();
 }
 
+let animateRotation = CAMERA_ANGLE;
+
 let Animate = () => {
     requestAnimationFrame( Animate )
-    rotation += 0.5
+    animateRotation += 0.5
+    //Uncomment to capture the image in every frame in case you want to make a prerendered animation
     //DownloadCanvasAsImage();
-    Render(rotation);
+    Render(animateRotation);
 }
 
 
-Render(0);
+Render(CAMERA_ANGLE);
+//Uncomment to animate. Warning: extremely slow in high resolutions.
 //Animate()
 
  
